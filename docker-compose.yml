@@ -6,8 +6,8 @@ services:
     image: minseohong/override
     container_name: override
     ports:
-      - "8000:8000"
+      - ${PORT_MAPPING}
     volumes:
-      - ./app:/code/app
+      - .:/code
     environment:
       - PYTHONUNBUFFERED=1
