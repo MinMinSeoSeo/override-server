@@ -1,0 +1,13 @@
+version: "3.8"
+services:
+  override:
+    build: .
+    platform: linux/amd64
+    image: minseohong/override
+    container_name: override
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./app:/code/app
+    environment:
+      - PYTHONUNBUFFERED=1
