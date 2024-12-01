@@ -1,5 +1,10 @@
+import random
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, ConfigDict, Field
+from enum import Enum
+from typing import List
+import humps
 
 app = FastAPI()
 
@@ -16,6 +21,93 @@ app.add_middleware(
 )
 
 
+class CamelCaseModel(BaseModel):
+    model_config = ConfigDict(
+        alias_generator=humps.camelize,
+        populate_by_name=True
+    )
+
+
+class GroupType(str, Enum):
+    family = "family"
+    friends = "friends"
+    couple = "couple"
+    solo = "solo"
+
+
+class AgeGroupStatus(str, Enum):
+    elderly = "elderly"
+    child = "child"
+    both = "both"
+    none = "none"
+
+
+class DifficultyLevel(str, Enum):
+    low = "low"
+    medium = "medium"
+    high = "high"
+
+
+class AttractionRecommendRequest(CamelCaseModel):
+    attractions_count: int = Field(..., ge=1, le=5)
+    group_type: GroupType
+    age_group_status: AgeGroupStatus
+    difficulty_levels: List[DifficultyLevel]
+    theme_tags: List[str]
+
+
+class Attraction(CamelCaseModel):
+    name: str
+    image_url: str
+
+
+class AttractionGroup(CamelCaseModel):
+    attractions: List[Attraction]
+
+
+class AttractionRecommendResponse(CamelCaseModel):
+    attractionGroups: List[AttractionGroup]
+
+
+def extract_random_items(source_list, count):
+    extracted_items = []
+
+    for _ in range(count):
+        if source_list:
+            selected_item = random.choice(source_list)
+            extracted_items.append(selected_item)
+            source_list.remove(selected_item)
+
+    return extracted_items
+
+
 @app.get("/")
 def read_root():
     return {"message": "Hello World"}
+
+
+@app.post("/attractions/recommendations", response_model=AttractionRecommendResponse)
+async def get_attraction_recommendations(request: AttractionRecommendRequest):
+    allAttractionList = [
+        Attraction(name="Attraction 1",
+                   image_url="https://via.placeholder.com/150"),
+        Attraction(name="Attraction 2",
+                   image_url="https://via.placeholder.com/150"),
+        Attraction(name="Attraction 3",
+                   image_url="https://via.placeholder.com/150"),
+        Attraction(name="Attraction 4",
+                   image_url="https://via.placeholder.com/150"),
+        Attraction(name="Attraction 5",
+                   image_url="https://via.placeholder.com/150"),
+    ]
+
+    attractionGroups = []
+
+    while len(allAttractionList) >= request.attractions_count:
+        selected_items = extract_random_items(
+            allAttractionList, request.attractions_count)
+
+        attractionGroups.append(AttractionGroup(
+            attractions=selected_items))
+
+    return AttractionRecommendResponse(attractionGroups=attractionGroups)
