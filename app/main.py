@@ -49,7 +49,7 @@ class DifficultyLevel(str, Enum):
 
 
 class AttractionRecommendRequest(CamelCaseModel):
-    attractions_count: int = Field(..., ge=1, le=5)
+    attraction_count: int = Field(..., ge=1, le=5)
     group_type: GroupType
     age_group_status: AgeGroupStatus
     difficulty_levels: List[DifficultyLevel]
@@ -103,9 +103,9 @@ async def get_attraction_recommendations(request: AttractionRecommendRequest):
 
     attractionGroups = []
 
-    while len(allAttractionList) >= request.attractions_count:
+    while len(allAttractionList) >= request.attraction_count:
         selected_items = extract_random_items(
-            allAttractionList, request.attractions_count)
+            allAttractionList, request.attraction_count)
 
         attractionGroups.append(AttractionGroup(
             attractions=selected_items))
