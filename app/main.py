@@ -90,8 +90,8 @@ def read_root():
     return {"message": "Hello World"}
 
 
-@app.post("/attractions/recommendations")
-async def get_attraction_recommendations(request: AttractionRecommendRequest):
+@app.post("/attractions/recommendations", response_model=AttractionRecommendResponse)
+async def recommend_attractions(request: AttractionRecommendRequest):
     file_path = './app/data/attractions.csv'
     if os.path.exists(file_path):
         df = pd.read_csv(file_path)
