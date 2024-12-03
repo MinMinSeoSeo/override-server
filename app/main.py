@@ -1,10 +1,14 @@
+import os
 import random
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 from enum import Enum
 from typing import List
 import humps
+import pandas as pd
+import os
+
 
 app = FastAPI()
 
@@ -86,24 +90,27 @@ def read_root():
     return {"message": "Hello World"}
 
 
-@app.post("/attractions/recommendations", response_model=AttractionRecommendResponse)
+@app.post("/attractions/recommendations")
 async def get_attraction_recommendations(request: AttractionRecommendRequest):
+    file_path = './app/data/attractions.csv'
+    if os.path.exists(file_path):
+        df = pd.read_csv(file_path)
+    else:
+        return HTTPException(status_code=404, detail="Data file not found")
+
     allAttractionList = [
-        Attraction(name="Attraction 1",
-                   image_url="https://via.placeholder.com/150"),
-        Attraction(name="Attraction 2",
-                   image_url="https://via.placeholder.com/150"),
-        Attraction(name="Attraction 3",
-                   image_url="https://via.placeholder.com/150"),
-        Attraction(name="Attraction 4",
-                   image_url="https://via.placeholder.com/150"),
-        Attraction(name="Attraction 5",
-                   image_url="https://via.placeholder.com/150"),
+        Attraction(name=row['name'], image_url=row['image_url'])
+        for _, row in df.iterrows()
     ]
+
+    print(len(allAttractionList))
 
     attractionGroups = []
 
-    while len(allAttractionList) >= request.attraction_count:
+    for _ in range(5):
+        if len(allAttractionList) < request.attraction_count:
+            break
+
         selected_items = extract_random_items(
             allAttractionList, request.attraction_count)
 
