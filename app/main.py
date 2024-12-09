@@ -7,7 +7,7 @@ from enum import Enum
 from typing import List
 import humps
 import pandas as pd
-import os
+import random
 
 
 app = FastAPI()
@@ -77,7 +77,7 @@ class AttractionRecommendResponse(CamelCaseModel):
     attractionGroups: List[AttractionGroup]
 
 
-def extract_random_items(source_list, count):
+def extract_random_items(source_list, count): #사용 X
     extracted_items = []
 
     for _ in range(count):
@@ -132,6 +132,25 @@ def backtrack(all_attraction_list, start, path, current_score, all_combinations,
         )
         path.pop()
 
+def select_combinations(sorted_combinations, option_number, max_overlap):
+    recommend_combinations = []
+    for combo in sorted_combinations:
+        max_duplicated_count = 0
+        for existing_combo in recommend_combinations:
+            duplicated_count = 0
+            for attr in combo[0]:
+                if attr in existing_combo[0]:
+                    duplicated_count += 1
+            if duplicated_count > max_duplicated_count:
+                max_duplicated_count = duplicated_count
+        
+        if max_duplicated_count <= max_overlap:
+            random.shuffle(combo[0])
+            recommend_combinations.append(combo)
+        if len(recommend_combinations) == option_number:
+            break
+    return recommend_combinations
+
 def to_attraction_form(recommended_combinations):
     attraction_groups = []
     for combo, _ in recommended_combinations:
@@ -153,6 +172,7 @@ def to_attraction_form(recommended_combinations):
 def read_root():
     return {"message": "Hello World"}
 
+import json
 
 @app.post("/attractions/recommendations", response_model=AttractionRecommendResponse)
 async def recommend_attractions(request: AttractionRecommendRequest):
@@ -160,7 +180,7 @@ async def recommend_attractions(request: AttractionRecommendRequest):
     if os.path.exists(file_path):
         df = pd.read_csv(file_path)
     else:
-        return HTTPException(status_code=404, detail="Data file not found (check the attractions.csv)")
+        raise HTTPException(status_code=404, detail="Data file not found (check the attractions.csv)") # 수정 1: return -> raise
 
     filtered_df = df[df.apply(lambda row: attraction_filter(row, request.group_type, request.difficulty_levels), axis=1)]
 
@@ -179,14 +199,15 @@ async def recommend_attractions(request: AttractionRecommendRequest):
         }
         allAttractionList.append(attraction)
 
-    print(len(allAttractionList))
+    # print('~-'*50, len(allAttractionList))
 
     all_combinations = []
     backtrack(allAttractionList, 0, [], 0, all_combinations, request.attraction_count)
 
     option_number = 5 #화면에 표시할 놀이기구 조합의 개수 (더보기 눌렀을 때 기준 5개)
+    max_overlap = 1 #추천 조합 간 중복되는 놀이기구의 최대 개수
     all_combinations_sorted = sorted(all_combinations, key=lambda x: x[1], reverse=True)
-    recommended_combinations = all_combinations_sorted[:option_number]
+    recommended_combinations = select_combinations(all_combinations_sorted, option_number, max_overlap)
     
     """
     print(f"{option_number}개의 놀이기구 조합:")
@@ -194,7 +215,7 @@ async def recommend_attractions(request: AttractionRecommendRequest):
         attraction_names = [attr['name'] for attr in combo]
         print(f"\n조합 {idx}: (총 점수: {score:.2f})")
         for name in attraction_names:
-            print(f" - {name}")
+            print(f" - {name} ({combo[0]['difficulty']})")
     """
 
     attractionGroups = to_attraction_form(recommended_combinations)
