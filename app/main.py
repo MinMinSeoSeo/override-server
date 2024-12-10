@@ -118,8 +118,18 @@ def attraction_filter(attraction_row, group_type, difficulty_levels):
         return False
     return True
 
+def get_embedding_scores(theme_tags):
+    result = get_recommend_scores(theme_tags[0])
+    for tag in theme_tags[1:]:
+        temp = get_recommend_scores(tag)
+        for attr_name in temp:
+            result[attr_name] += temp[attr_name]
+    for attr_name in result:
+        result[attr_name] /= len(theme_tags)
+    #print(json.dumps(result, indent=4))
+    return result
 
-def score_estimator(attraction_row, age_group_status, theme_tags):
+def score_estimator(attraction_row, age_group_status, theme_score):
     if age_group_status == 'both':
         score = 0.5 * \
             (attraction_row['senior_friendly_score'] +
@@ -131,14 +141,7 @@ def score_estimator(attraction_row, age_group_status, theme_tags):
     else:
         score = 0.5
 
-    attraction_theme = attraction_row['theme'].split(',')
-    include_theme_count = 0
-    for t in theme_tags:
-        if t in attraction_theme:
-            include_theme_count += 1
-    theme_score = include_theme_count / len(theme_tags)
     score = 0.5*(score + theme_score)
-
     return score
 
 
@@ -204,7 +207,7 @@ def get_embedding(text, model="text-embedding-3-small"):
     return response.data[0].embedding
 
 
-def get_recommend_scores(query):
+def get_recommend_scores(query, test=False):
     query_embedding = np.array(get_embedding(query))
     query_embedding = query_embedding.reshape(1, -1)
 
@@ -215,20 +218,24 @@ def get_recommend_scores(query):
     attraction_embeddings = np.array(list(embeddings.values()))
 
     similarities = cosine_similarity(query_embedding, attraction_embeddings)[0]
-    ranked_indices = np.argsort(similarities)[::-1]
+    #ranked_indices = np.argsort(similarities)[::-1]
 
-    recommendations = [(attraction_names[i], float(similarities[i]))
-                       for i in ranked_indices[:]]
+    #recommendations = [(attraction_names[i], float(similarities[i])) for i in ranked_indices[:]]
+    recommendations = [(attraction_names[i], float(similarities[i])) for i in range(len(similarities[:]))]
 
-    result = [
-        {
-            "name": name,
-            "score": score
-        } for name, score in recommendations
-    ]
+    if test:
+        result = [
+            {
+                "name": name,
+                "score": score
+            } for name, score in recommendations
+        ]
+    else:
+        result = {}
+        for name, score in recommendations:
+            result[name] = score
 
     return result
-
 
 @app.get("/", response_model=MessageResponse)
 def read_root():
@@ -244,11 +251,12 @@ async def recommend_attractions(request: AttractionRecommendRequest):
 
     filtered_df = df[df.apply(lambda row: attraction_filter(
         row, request.group_type, request.difficulty_levels), axis=1)]
+    
+    embedding_scores = get_embedding_scores(request.theme_tags)
 
     allAttractionList = []
     for _, row in filtered_df.iterrows():
-        score = score_estimator(
-            row, request.age_group_status, request.theme_tags)
+        score = score_estimator(row, request.age_group_status, embedding_scores[row['name']])
         attraction = {
             'name': row['name'],
             'image_url': row['image_url'],
@@ -308,6 +316,6 @@ async def update_embeddings():
 
 @app.post('/embeddings/recommend', response_model=List[EmbeddingRecommendResponse])
 async def recommend_test(request: RecommendTestRequest):
-    result = get_recommend_scores(request.query)
+    result = get_recommend_scores(request.query, test=True)
 
     return result
