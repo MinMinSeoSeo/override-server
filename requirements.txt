@@ -1,4 +1,8 @@
 fastapi
 uvicorn
 pyhumps
+numpy
 pandas
+scikit-learn
+openai
+python-dotenv
