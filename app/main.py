@@ -234,8 +234,6 @@ def get_recommend_scores(query):
 def read_root():
     return {"message": "Hello World"}
 
-import json
-
 @app.post("/attractions/recommendations", response_model=AttractionRecommendResponse)
 async def recommend_attractions(request: AttractionRecommendRequest):
     file_path = './app/data/attractions.csv'
