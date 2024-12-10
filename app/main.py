@@ -23,6 +23,9 @@ app = FastAPI()
 
 origins = [
     "http://localhost:3000",
+    "https://override-amusement-park.com",
+    "https://www.override-amusement-park.com",
+    "https://override-amusement-park.vercel.app",
 ]
 
 app.add_middleware(
