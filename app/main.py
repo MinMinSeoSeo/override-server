@@ -6,8 +6,17 @@ from pydantic import BaseModel, ConfigDict, Field
 from enum import Enum
 from typing import List
 import humps
+import numpy as np
 import pandas as pd
+from sklearn.metrics.pairwise import cosine_similarity
 import os
+import openai
+from dotenv import load_dotenv
+import json
+
+load_dotenv()
+
+openai.api_key = os.getenv('OPENAI_API_KEY')
 
 
 app = FastAPI()
@@ -69,12 +78,26 @@ class Attraction(CamelCaseModel):
     usage_info: str
     concept: str
 
+
 class AttractionGroup(CamelCaseModel):
     attractions: List[Attraction]
 
 
 class AttractionRecommendResponse(CamelCaseModel):
     attractionGroups: List[AttractionGroup]
+
+
+class RecommendTestRequest(CamelCaseModel):
+    query: str
+
+
+class MessageResponse(CamelCaseModel):
+    message: str
+
+
+class EmbeddingRecommendResponse(CamelCaseModel):
+    name: str
+    score: float
 
 
 def extract_random_items(source_list, count):
@@ -88,6 +111,7 @@ def extract_random_items(source_list, count):
 
     return extracted_items
 
+
 def attraction_filter(attraction_row, group_type, difficulty_levels):
     if group_type not in attraction_row['companion_type']+',solo':
         return False
@@ -95,9 +119,12 @@ def attraction_filter(attraction_row, group_type, difficulty_levels):
         return False
     return True
 
+
 def score_estimator(attraction_row, age_group_status, theme_tags):
     if age_group_status == 'both':
-        score = 0.5 * (attraction_row['senior_friendly_score'] + attraction_row['child_friendly_score'])
+        score = 0.5 * \
+            (attraction_row['senior_friendly_score'] +
+             attraction_row['child_friendly_score'])
     elif age_group_status == 'elderly':
         score = attraction_row['senior_friendly_score']
     elif age_group_status == 'child':
@@ -114,6 +141,7 @@ def score_estimator(attraction_row, age_group_status, theme_tags):
     score = 0.5*(score + theme_score)
 
     return score
+
 
 def backtrack(all_attraction_list, start, path, current_score, all_combinations, attraction_count):
     if len(path) == attraction_count:
@@ -132,24 +160,60 @@ def backtrack(all_attraction_list, start, path, current_score, all_combinations,
         )
         path.pop()
 
+
 def to_attraction_form(recommended_combinations):
     attraction_groups = []
     for combo, _ in recommended_combinations:
         attractions = []
         for attr in combo:
             attractions.append(Attraction(
-                name = attr['name'],
-                image_url = attr['image_url'],
-                description = attr['description'],
-                location = attr['location'],
-                difficulty = attr['difficulty'],
-                usage_info = attr['usage_info'],
-                concept = attr['concept']
+                name=attr['name'],
+                image_url=attr['image_url'],
+                description=attr['description'],
+                location=attr['location'],
+                difficulty=attr['difficulty'],
+                usage_info=attr['usage_info'],
+                concept=attr['concept']
             ))
         attraction_groups.append(AttractionGroup(attractions=attractions))
     return attraction_groups
 
-@app.get("/")
+
+def get_embedding(text, model="text-embedding-3-small"):
+    response = openai.embeddings.create(
+        input=[text],
+        model=model
+    )
+    return response.data[0].embedding
+
+
+def get_recommend_scores(query):
+    query_embedding = np.array(get_embedding(query))
+    query_embedding = query_embedding.reshape(1, -1)
+
+    with open("./app/data/embeddings.json", "r") as f:
+        embeddings = json.load(f)
+
+    attraction_names = list(embeddings.keys())
+    attraction_embeddings = np.array(list(embeddings.values()))
+
+    similarities = cosine_similarity(query_embedding, attraction_embeddings)[0]
+    ranked_indices = np.argsort(similarities)[::-1]
+
+    recommendations = [(attraction_names[i], float(similarities[i]))
+                       for i in ranked_indices[:]]
+
+    result = [
+        {
+            "name": name,
+            "score": score
+        } for name, score in recommendations
+    ]
+
+    return result
+
+
+@app.get("/", response_model=MessageResponse)
 def read_root():
     return {"message": "Hello World"}
 
@@ -162,11 +226,13 @@ async def recommend_attractions(request: AttractionRecommendRequest):
     else:
         return HTTPException(status_code=404, detail="Data file not found (check the attractions.csv)")
 
-    filtered_df = df[df.apply(lambda row: attraction_filter(row, request.group_type, request.difficulty_levels), axis=1)]
+    filtered_df = df[df.apply(lambda row: attraction_filter(
+        row, request.group_type, request.difficulty_levels), axis=1)]
 
     allAttractionList = []
     for _, row in filtered_df.iterrows():
-        score = score_estimator(row, request.age_group_status, request.theme_tags)
+        score = score_estimator(
+            row, request.age_group_status, request.theme_tags)
         attraction = {
             'name': row['name'],
             'image_url': row['image_url'],
@@ -182,12 +248,14 @@ async def recommend_attractions(request: AttractionRecommendRequest):
     print(len(allAttractionList))
 
     all_combinations = []
-    backtrack(allAttractionList, 0, [], 0, all_combinations, request.attraction_count)
+    backtrack(allAttractionList, 0, [], 0,
+              all_combinations, request.attraction_count)
 
-    option_number = 5 #화면에 표시할 놀이기구 조합의 개수 (더보기 눌렀을 때 기준 5개)
-    all_combinations_sorted = sorted(all_combinations, key=lambda x: x[1], reverse=True)
+    option_number = 5  # 화면에 표시할 놀이기구 조합의 개수 (더보기 눌렀을 때 기준 5개)
+    all_combinations_sorted = sorted(
+        all_combinations, key=lambda x: x[1], reverse=True)
     recommended_combinations = all_combinations_sorted[:option_number]
-    
+
     """
     print(f"{option_number}개의 놀이기구 조합:")
     for idx, (combo, score) in enumerate(recommended_combinations, 1):
@@ -200,3 +268,29 @@ async def recommend_attractions(request: AttractionRecommendRequest):
     attractionGroups = to_attraction_form(recommended_combinations)
 
     return AttractionRecommendResponse(attractionGroups=attractionGroups)
+
+
+@app.post('/embeddings/update', response_model=MessageResponse)
+async def update_embeddings():
+    df = pd.read_csv('./app/data/attractions.csv')
+
+    attraction_names = df['name'].tolist()
+    attraction_descriptions = df['description'].tolist()
+
+    embeddings = {}
+
+    for name, desc in zip(attraction_names, attraction_descriptions):
+        embedding = get_embedding(f"{name} {desc}")
+        embeddings[name] = embedding
+
+    with open("./app/data/embeddings.json", "w") as f:
+        json.dump(embeddings, f)
+
+    return {"message": "Embeddings Updated!"}
+
+
+@app.post('/embeddings/recommend', response_model=List[EmbeddingRecommendResponse])
+async def recommend_test(request: RecommendTestRequest):
+    result = get_recommend_scores(request.query)
+
+    return result
