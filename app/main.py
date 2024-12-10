@@ -292,11 +292,12 @@ async def update_embeddings():
 
     attraction_names = df['name'].tolist()
     attraction_descriptions = df['description'].tolist()
+    attraction_concepts = df['concept_tags'].tolist()
 
     embeddings = {}
 
-    for name, desc in zip(attraction_names, attraction_descriptions):
-        embedding = get_embedding(f"{name} {desc}")
+    for name, description, concept in zip(attraction_names, attraction_descriptions, attraction_concepts):
+        embedding = get_embedding(f"{name} {description} {concept}")
         embeddings[name] = embedding
 
     with open("./app/data/embeddings.json", "w") as f:
