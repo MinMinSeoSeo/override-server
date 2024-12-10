@@ -8,8 +8,8 @@ from typing import List
 import humps
 import numpy as np
 import pandas as pd
+import random
 from sklearn.metrics.pairwise import cosine_similarity
-import os
 import openai
 from dotenv import load_dotenv
 import json
@@ -102,8 +102,7 @@ class EmbeddingRecommendResponse(CamelCaseModel):
     name: str
     score: float
 
-
-def extract_random_items(source_list, count):
+def extract_random_items(source_list, count): #사용 X
     extracted_items = []
 
     for _ in range(count):
@@ -122,8 +121,18 @@ def attraction_filter(attraction_row, group_type, difficulty_levels):
         return False
     return True
 
+def get_embedding_scores(theme_tags):
+    result = get_recommend_scores(theme_tags[0])
+    for tag in theme_tags[1:]:
+        temp = get_recommend_scores(tag)
+        for attr_name in temp:
+            result[attr_name] += temp[attr_name]
+    for attr_name in result:
+        result[attr_name] /= len(theme_tags)
+    #print(json.dumps(result, indent=4))
+    return result
 
-def score_estimator(attraction_row, age_group_status, theme_tags):
+def score_estimator(attraction_row, age_group_status, theme_score):
     if age_group_status == 'both':
         score = 0.5 * \
             (attraction_row['senior_friendly_score'] +
@@ -135,14 +144,7 @@ def score_estimator(attraction_row, age_group_status, theme_tags):
     else:
         score = 0.5
 
-    attraction_theme = attraction_row['theme'].split(',')
-    include_theme_count = 0
-    for t in theme_tags:
-        if t in attraction_theme:
-            include_theme_count += 1
-    theme_score = include_theme_count / len(theme_tags)
     score = 0.5*(score + theme_score)
-
     return score
 
 
@@ -163,6 +165,24 @@ def backtrack(all_attraction_list, start, path, current_score, all_combinations,
         )
         path.pop()
 
+def select_combinations(sorted_combinations, option_number, max_overlap):
+    recommend_combinations = []
+    for combo in sorted_combinations:
+        max_duplicated_count = 0
+        for existing_combo in recommend_combinations:
+            duplicated_count = 0
+            for attr in combo[0]:
+                if attr in existing_combo[0]:
+                    duplicated_count += 1
+            if duplicated_count > max_duplicated_count:
+                max_duplicated_count = duplicated_count
+        
+        if max_duplicated_count <= max_overlap:
+            random.shuffle(combo[0])
+            recommend_combinations.append(combo)
+        if len(recommend_combinations) == option_number:
+            break
+    return recommend_combinations
 
 def to_attraction_form(recommended_combinations):
     attraction_groups = []
@@ -190,7 +210,7 @@ def get_embedding(text, model="text-embedding-3-small"):
     return response.data[0].embedding
 
 
-def get_recommend_scores(query):
+def get_recommend_scores(query, test=False):
     query_embedding = np.array(get_embedding(query))
     query_embedding = query_embedding.reshape(1, -1)
 
@@ -201,25 +221,28 @@ def get_recommend_scores(query):
     attraction_embeddings = np.array(list(embeddings.values()))
 
     similarities = cosine_similarity(query_embedding, attraction_embeddings)[0]
-    ranked_indices = np.argsort(similarities)[::-1]
+    #ranked_indices = np.argsort(similarities)[::-1]
 
-    recommendations = [(attraction_names[i], float(similarities[i]))
-                       for i in ranked_indices[:]]
+    #recommendations = [(attraction_names[i], float(similarities[i])) for i in ranked_indices[:]]
+    recommendations = [(attraction_names[i], float(similarities[i])) for i in range(len(similarities[:]))]
 
-    result = [
-        {
-            "name": name,
-            "score": score
-        } for name, score in recommendations
-    ]
+    if test:
+        result = [
+            {
+                "name": name,
+                "score": score
+            } for name, score in recommendations
+        ]
+    else:
+        result = {}
+        for name, score in recommendations:
+            result[name] = score
 
     return result
-
 
 @app.get("/", response_model=MessageResponse)
 def read_root():
     return {"message": "Hello World"}
-
 
 @app.post("/attractions/recommendations", response_model=AttractionRecommendResponse)
 async def recommend_attractions(request: AttractionRecommendRequest):
@@ -227,15 +250,16 @@ async def recommend_attractions(request: AttractionRecommendRequest):
     if os.path.exists(file_path):
         df = pd.read_csv(file_path)
     else:
-        return HTTPException(status_code=404, detail="Data file not found (check the attractions.csv)")
+        raise HTTPException(status_code=404, detail="Data file not found (check the attractions.csv)") # 수정 1: return -> raise
 
     filtered_df = df[df.apply(lambda row: attraction_filter(
         row, request.group_type, request.difficulty_levels), axis=1)]
+    
+    embedding_scores = get_embedding_scores(request.theme_tags)
 
     allAttractionList = []
     for _, row in filtered_df.iterrows():
-        score = score_estimator(
-            row, request.age_group_status, request.theme_tags)
+        score = score_estimator(row, request.age_group_status, embedding_scores[row['name']])
         attraction = {
             'name': row['name'],
             'image_url': row['image_url'],
@@ -248,24 +272,24 @@ async def recommend_attractions(request: AttractionRecommendRequest):
         }
         allAttractionList.append(attraction)
 
-    print(len(allAttractionList))
+    # print('~-'*50, len(allAttractionList))
 
     all_combinations = []
     backtrack(allAttractionList, 0, [], 0,
               all_combinations, request.attraction_count)
 
-    option_number = 5  # 화면에 표시할 놀이기구 조합의 개수 (더보기 눌렀을 때 기준 5개)
-    all_combinations_sorted = sorted(
-        all_combinations, key=lambda x: x[1], reverse=True)
-    recommended_combinations = all_combinations_sorted[:option_number]
-
+    option_number = 5 #화면에 표시할 놀이기구 조합의 개수 (더보기 눌렀을 때 기준 5개)
+    max_overlap = 1 #추천 조합 간 중복되는 놀이기구의 최대 개수
+    all_combinations_sorted = sorted(all_combinations, key=lambda x: x[1], reverse=True)
+    recommended_combinations = select_combinations(all_combinations_sorted, option_number, max_overlap)
+    
     """
     print(f"{option_number}개의 놀이기구 조합:")
     for idx, (combo, score) in enumerate(recommended_combinations, 1):
         attraction_names = [attr['name'] for attr in combo]
         print(f"\n조합 {idx}: (총 점수: {score:.2f})")
         for name in attraction_names:
-            print(f" - {name}")
+            print(f" - {name} ({combo[0]['difficulty']})")
     """
 
     attractionGroups = to_attraction_form(recommended_combinations)
@@ -295,6 +319,6 @@ async def update_embeddings():
 
 @app.post('/embeddings/recommend', response_model=List[EmbeddingRecommendResponse])
 async def recommend_test(request: RecommendTestRequest):
-    result = get_recommend_scores(request.query)
+    result = get_recommend_scores(request.query, test=True)
 
     return result
