@@ -122,7 +122,11 @@ def attraction_filter(attraction_row, group_type, difficulty_levels):
     return True
 
 def get_embedding_scores(theme_tags):
-    result = get_recommend_scores(theme_tags[0])
+    if not theme_tags:
+        result = {}
+        return result
+    else:
+        result = get_recommend_scores(theme_tags[0])
     for tag in theme_tags[1:]:
         temp = get_recommend_scores(tag)
         for attr_name in temp:
@@ -259,6 +263,7 @@ async def recommend_attractions(request: AttractionRecommendRequest):
 
     allAttractionList = []
     for _, row in filtered_df.iterrows():
+        if row['name'] not in embedding_scores: embedding_scores[row['name']] = 0
         score = score_estimator(row, request.age_group_status, embedding_scores[row['name']])
         attraction = {
             'name': row['name'],
